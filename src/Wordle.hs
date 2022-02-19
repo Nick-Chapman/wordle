@@ -4,6 +4,7 @@ import Data.List (maximumBy)
 import Data.Ord (comparing)
 import Prelude hiding (Word)
 import System.Environment (getArgs)
+import System.IO (hFlush,stdout)
 import qualified Data.Map.Strict as Map
 
 main :: IO ()
@@ -51,19 +52,27 @@ load path = do
 exploreBots :: IO ()
 exploreBots = do
     answers <- loadDD Answers
-    let bot1 = makeBot1 (makeWord "raise") answers
-    let bot2 = makeBot2 (makeWord "raise") answers
-    tryBot bot1 answers
-    tryBot bot2 answers
+    let _bot1 = makeBot1 (makeWord "raise") answers
+    tryBot _bot1 answers
+
+    let _bot2 = makeBot2 (makeWord "raise") answers
+    --tryBot _bot2 answers
+
+    let _bot3 = makeBot3 (makeWord "raise") answers
+    --tryBot _bot3 answers
+
+    pure ()
 
 tryBot :: Bot -> Dict -> IO ()
 tryBot bot answers = do
   -- show details of 24 specific games
   myGames <- load "my-games.list"
-  sequence_ [ runGame hidden bot | hidden <- dictWords myGames ]
+  sequence_ [ runGame answers hidden bot | hidden <- dictWords myGames ]
   -- then compute the stats or the full answer list
   putStrLn "------------------------------"
+  let _ = testBotDisplay myGames bot -- minitest
   testBotDisplay answers bot
+  pure ()
 
 --[entropy]-----------------------------------------------------------
 
@@ -195,25 +204,48 @@ data Act -- Bot actions
   = Log String Act
   | Guess Word (Mark -> Act)
 
-runGame :: Word -> Bot -> IO ()
-runGame hidden Bot{act} = do
+runGame :: Dict -> Word -> Bot -> IO ()
+runGame answers hidden Bot{act} = do
   putStrLn "------------------------------"
   putStrLn ("GameRunner: hidden = " ++ show hidden)
-  run 1 act
+  run answers 1 act
   where
-    run :: Int -> Act -> IO ()
-    run n = \case
-      Log message act -> do putStrLn ("bot: " ++ message); run n act
+    run :: Dict -> Int -> Act -> IO ()
+    run possible i = \case
+      Log message act -> do
+        putStrLn ("bot: " ++ message)
+        run possible i act
       Guess guess f -> do
         let mark = computeMark guess hidden
-        putStrLn ("guess#" ++ show n ++ " : " ++ show guess ++ " --> " ++ show mark)
-        if guess == hidden then pure () else
-          run (n+1) (f mark)
+
+        let n = length (dictWords possible)
+        let possible' = filterDict possible guess mark
+        let n' = length (dictWords possible')
+
+        putStrLn $
+          "guess #" ++ show i ++ " : " ++
+          show guess ++ " --> " ++ show mark ++
+          " " ++ show n ++ "/" ++ show n'
+
+        if guess == hidden || i==25 then pure () else
+          run possible' (i+1) (f mark)
 
 -- | test bot over a set of words, returning the number of guess for each word
 testBotDisplay :: Dict -> Bot -> IO ()
 testBotDisplay dict Bot{description,act} = do
-  let ns = [ howManyGuess hidden act | hidden <- dictWords dict ]
+  let
+    loop :: [Int] -> Int -> [Word] -> IO [Int]
+    loop acc i = \case
+      [] -> pure acc
+      hidden:more -> do
+        putStr (if i `mod` 100 == 0 then [['c'..'z'] !! (i `div` 100)] else ".")
+        hFlush stdout
+        let! n = howManyGuess hidden act
+        loop (n:acc) (i+1) more
+
+  ns <- loop [] 1 (dictWords dict)
+  putStrLn ""
+
   let dist = [ (n,length xs) | (n,xs) <- hist [ (n,()) | n <- ns ] ]
   let tot = sum ns
   let av :: Double = fromIntegral tot / fromIntegral (length (dictWords dict))
@@ -234,7 +266,7 @@ howManyGuess hidden = run 1
       Log _ bot -> run n bot
       Guess guess f -> do
         let mark = computeMark guess hidden
-        if guess == hidden then n else
+        if guess == hidden || n == 100 then n else
           run (n+1) (f mark)
 
 
@@ -242,36 +274,32 @@ howManyGuess hidden = run 1
 
 makeBot1 :: Word -> Dict -> Bot
 makeBot1 guess1 answers = do
-  let description =  "{guess1 = " ++ show guess1 ++ "; then first word remaining}"
   let
-    act =
-      --Log ("I am: " ++ description) $
-      --Log ("#answers = " ++ show (length (dictWords answers))) $
-      Guess guess1 (loop answers guess1)
+    description =
+      "guess1='" ++ show guess1 ++ "'; " ++
+      "choose first word from remaining"
+  let act = Guess guess1 (loop answers guess1)
   Bot { description, act }
   where
     loop :: Dict -> Word -> Mark -> Act
     loop remaining lastGuess mark = do
       let remaining' = filterDict remaining lastGuess mark
-      let n = length (dictWords remaining)
-      let n' = length (dictWords remaining')
-      let p :: Double = fromIntegral n' / fromIntegral n
-      let _e = logBase 2.0 (1.0 / p)
-      let _message = "#remaining = " ++ show n' -- ++ " {e = " ++ show e ++ " }"
-      let nextGuess = anyWordFromDict remaining'
-      --Log _message $ Guess nextGuess (loop remaining' nextGuess)
+      let nextGuess = choose remaining'
       Guess nextGuess (loop remaining' nextGuess)
 
-anyWordFromDict :: Dict -> Word
-anyWordFromDict Dict { dictWords } =
-  if length dictWords == 0 then error "anyWordFromDict: dict is empty" else
-    head dictWords
+    choose :: Dict -> Word
+    choose dict =
+      if length (dictWords dict) == 0 then error "bot2: dict is empty" else
+        head (dictWords dict)
 
 --[bot2]--------------------------------------------------------------
 
 makeBot2 :: Word -> Dict -> Bot
 makeBot2 guess1 answers = do
-  let description =  "{guess1 = " ++ show guess1 ++ "; then max entropy}"
+  let
+    description =
+      "guess1='" ++ show guess1 ++ "'; " ++
+      "choose from remaining, maximizing entropy over remaining"
   let act = Guess guess1 (loop answers guess1)
   Bot { description, act }
   where
@@ -286,14 +314,36 @@ makeBot2 guess1 answers = do
         _mes1 =
           "#remaining = " ++ show n' ++
           ", actual-entropy(" ++ show lastGuess ++ ") = " ++ show e
-      let (nextGuess,ee) = bestWordInDict remaining'
+      let (nextGuess,ee) = choose remaining'
       let _mes2 = "calc-entropy(" ++ show nextGuess ++ ") = " ++ show ee
       --Log _mes1 $ Log _mes2 $ Guess nextGuess (loop remaining' nextGuess)
       Guess nextGuess (loop remaining' nextGuess)
 
--- word with the maximum entropy
-bestWordInDict :: Dict -> (Word,Double)
-bestWordInDict dict =
-  if length (dictWords dict) == 0 then error "bestWordInDict: dict is empty" else
-    maximumBy (comparing snd)
-    [ (guess, calcEntropy dict guess) | guess <- dictWords dict ]
+    choose :: Dict -> (Word,Double)
+    choose remaining =
+      maximumBy (comparing snd)
+      [ (guess, calcEntropy remaining guess) | guess <- dictWords remaining ]
+
+--[bot3]--------------------------------------------------------------
+
+makeBot3 :: Word -> Dict -> Bot
+makeBot3 guess1 answers = do
+  let
+    description =
+      "guess1='" ++ show guess1 ++ "'; " ++
+      "choose from answers, maximizing entropy over remaining"
+  let act = Guess guess1 (loop answers guess1)
+  Bot { description, act }
+  where
+    loop :: Dict -> Word -> Mark -> Act
+    loop remaining lastGuess mark = do
+      let remaining' = filterDict remaining lastGuess mark
+      let nextGuess = choose remaining'
+      Guess nextGuess (loop remaining' nextGuess)
+
+    choose :: Dict -> Word
+    choose remaining = do
+      let n = length (dictWords remaining)
+      if n == 1 || n==2 then head (dictWords remaining) else
+        fst $ maximumBy (comparing snd)
+        [ (guess, calcEntropy remaining guess) | guess <- dictWords answers ]
