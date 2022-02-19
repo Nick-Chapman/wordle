@@ -7,17 +7,18 @@ import qualified Data.Map.Strict as Map
 
 main :: IO ()
 main = do
-  dict <- load "answers.sorted"
-  mapM_ pr [ (word,calcEntropy dict word) | word <- allDictWords dict ]
+  legal <- load "legal.sorted"
+  answers <- load "answers.sorted"
+  mapM_ pr [ (word,calcEntropy answers word) | word <- allDictWords legal ]
   pure ()
     where pr (w,d) = putStrLn (show w ++ " " ++ show d)
 
 calcEntropy :: Dict -> Word -> Double
-calcEntropy answers guess = do
+calcEntropy dict guess = do
   let
-    sizeDict :: Double = fromIntegral (length (allDictWords answers))
+    sizeDict :: Double = fromIntegral (length (allDictWords dict))
     h1 =
-      hist [ (mark guess hidden,hidden) | hidden <- allDictWords answers ]
+      hist [ (mark guess hidden,hidden) | hidden <- allDictWords dict ]
   sum [ p*e
       | (_mark,words) <- h1
       , let n = length words

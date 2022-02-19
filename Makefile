@@ -1,5 +1,5 @@
 
-top: answers.entropy
+top: legal.entropy
 
-answers.entropy: Makefile src/*.hs
+legal.entropy: Makefile src/*.hs
 	stack run | sort -k 2 > $@
