@@ -1,4 +1,4 @@
-module Top (main) where
+module Wordle (main) where
 
 import Prelude hiding (Word)
 import qualified Data.Map.Strict as Map
