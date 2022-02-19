@@ -1,17 +1,42 @@
 module Wordle (main) where
 
 import Prelude hiding (Word)
+import System.Environment (getArgs)
 import qualified Data.Map.Strict as Map
 
 main :: IO ()
-main = do
-  legal <- load "legal.sorted"
-  answers <- load "answers.sorted"
-  mapM_ pr [ (word,calcEntropy answers word) | word <- allDictWords legal ]
-  pure ()
-    where pr (w,d) = putStrLn (show w ++ " " ++ show d)
+main = getArgs >>= (run . parse)
 
---[load] -------------------------------------------------------------
+parse :: [String] -> Config
+parse = \case
+  [] -> Play
+  ["gen","entropy"] -> GenEntropy { answers = Answers, guesses = Answers }
+  ["gen","entropy","all"] -> GenEntropy { answers = Answers, guesses = Legal }
+  args ->
+    error (show ("parse",args))
+
+run :: Config -> IO ()
+run = \case
+  Play -> play
+  GenEntropy {answers,guesses} -> do
+    answers <- loadDD answers
+    guesses <- loadDD guesses
+    genEntropy answers guesses
+
+--[config]-----------------------------------------------------------
+
+data Config
+  = Play
+  | GenEntropy { answers:: DictDescriptor, guesses:: DictDescriptor }
+
+data DictDescriptor = Answers | Legal
+
+--[load]--------------------------------------------------------------
+
+loadDD :: DictDescriptor -> IO Dict
+loadDD = \case
+  Answers -> load "answers.sorted"
+  Legal -> load "legal.sorted"
 
 load :: FilePath -> IO Dict
 load path = do
@@ -19,7 +44,18 @@ load path = do
   let words = [ mkWord line | line <- lines s ]
   pure (Dict words)
 
+--[play]-------------------------------------------------------------
+
+play :: IO ()
+play = error "play"
+
 --[entropy]-----------------------------------------------------------
+
+genEntropy :: Dict -> Dict -> IO ()
+genEntropy answers guesses = do
+  mapM_ pr [ (guess, calcEntropy answers guess) | guess <- allDictWords guesses ]
+  pure ()
+    where pr (w,d) = putStrLn (show w ++ " " ++ show d)
 
 calcEntropy :: Dict -> Word -> Double
 calcEntropy dict guess = do
