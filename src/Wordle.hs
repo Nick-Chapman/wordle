@@ -3,8 +3,6 @@ module Wordle (main) where
 import Prelude hiding (Word)
 import qualified Data.Map.Strict as Map
 
---[main]--------------------------------------------------------------------
-
 main :: IO ()
 main = do
   legal <- load "legal.sorted"
@@ -12,6 +10,16 @@ main = do
   mapM_ pr [ (word,calcEntropy answers word) | word <- allDictWords legal ]
   pure ()
     where pr (w,d) = putStrLn (show w ++ " " ++ show d)
+
+--[load] -------------------------------------------------------------
+
+load :: FilePath -> IO Dict
+load path = do
+  s <- readFile path
+  let words = [ mkWord line | line <- lines s ]
+  pure (Dict words)
+
+--[entropy]-----------------------------------------------------------
 
 calcEntropy :: Dict -> Word -> Double
 calcEntropy dict guess = do
@@ -26,12 +34,38 @@ calcEntropy dict guess = do
       , let e = logBase 2.0 (1.0 / p)
       ]
 
---[util] --------------------------------------------------------------------
+--[marking]-----------------------------------------------------------
 
-hist :: Ord k => [(k,v)] -> [(k,[v])]
-hist kvs = Map.toList $ Map.fromListWith (++) [ (k,[v]) | (k,v) <- kvs ]
+mark :: Word -> Word -> Mark
+mark (Word guess) (Word hidden) = do
+  let
+    pass1 :: ([Letter],(Letter,Letter)) -> (Bool,[Letter])
+    pass1 (unused,(guess,hidden)) = do
+      let match = (guess == hidden)
+      (match,if match then unused else hidden:unused)
 
---[types] --------------------------------------------------------------------
+  let
+    pass2 :: ([Letter],(Letter,Bool)) -> (Colour,[Letter])
+    pass2 (unused,(guess,isGreen)) =
+      if isGreen then (Green, unused) else
+        case lookYellow guess unused of
+          Nothing -> (Black, unused)
+          Just unused -> (Yellow, unused)
+
+  let (greenMatchQ,unused) = scanQ ([], zipQ guess hidden) pass1
+  let (colourQ,_) = scanQ (unused, zipQ guess greenMatchQ) pass2
+
+  Mark colourQ
+
+lookYellow :: Letter -> [Letter] -> Maybe [Letter]
+lookYellow x initial = loop [] initial
+  where
+    loop acc = \case
+      [] -> Nothing
+      y:ys -> if x==y then Just (acc++ys) else loop (y:acc) ys
+
+
+--[types] ------------------------------------------------------------
 
 data Dict = Dict { allDictWords :: [Word] }
 
@@ -55,16 +89,7 @@ newtype Letter = Letter { unLetter :: Char }
 data Pos = A | B | C | D | E
   deriving Show
 
-data Quin a = Quin a a a a a
-  deriving (Eq,Ord,Show,Functor)
-
-listQ :: Quin a -> [a]
-listQ (Quin a b c d e) = [a,b,c,d,e]
-
-zipQ :: Quin a -> Quin b -> Quin (a,b)
-zipQ (Quin a b c d e) (Quin v w x y z) = Quin (a,v) (b,w) (c,x) (d,y) (e,z)
-
---[show] --------------------------------------------------------------------
+--[Show] -------------------------------------------------------------
 
 instance Show Word where
   show (Word q) = listQ (fmap unLetter q)
@@ -78,46 +103,16 @@ instance Show Colour where
 instance Show Letter where
   show (Letter c) = show c
 
---[load] --------------------------------------------------------------------
+--[Quin]--------------------------------------------------------------
 
-load :: FilePath -> IO Dict
-load path = do
-  s <- readFile path
-  let words = [ mkWord line | line <- lines s ]
-  pure (Dict words)
+data Quin a = Quin a a a a a
+  deriving (Eq,Ord,Show,Functor)
 
-----------------------------------------------------------------------
+listQ :: Quin a -> [a]
+listQ (Quin a b c d e) = [a,b,c,d,e]
 
-mark :: Word -> Word -> Mark
-mark (Word guess) (Word hidden) = do
-  let
-    pass1 :: ([Letter],(Letter,Letter)) -> (Bool,[Letter])
-    pass1 (unused,(guess,hidden)) = do
-      let match = (guess == hidden)
-      (match,if match then unused else hidden:unused)
-
-  let
-    pass2 :: ([Letter],(Letter,Bool)) -> (Colour,[Letter])
-    pass2 (unused,(guess,isGreen)) =
-      if isGreen then (Green, unused) else
-        case lookYellow guess unused of
-          Nothing -> (Black, unused)
-          Just unused -> (Yellow, unused)
-
-  let (greenMatchQ,unused) = scanQ ([], zipQ guess hidden) pass1
-  let (colourQ,_) = scanQ (unused, zipQ guess greenMatchQ) pass2
-
-  Mark colourQ
-
-
-lookYellow :: Letter -> [Letter] -> Maybe [Letter]
-lookYellow x initial = loop [] initial
-  where
-    loop acc = \case
-      [] -> Nothing
-      y:ys -> if x==y then Just (acc++ys) else loop (y:acc) ys
-
-
+zipQ :: Quin a -> Quin b -> Quin (a,b)
+zipQ (Quin a b c d e) (Quin v w x y z) = Quin (a,v) (b,w) (c,x) (d,y) (e,z)
 
 scanQ :: (c, Quin a) -> ((c, a) -> (b, c)) -> (Quin b, c)
 scanQ (c0, Quin a1 a2 a3 a4 a5) f = (Quin b1 b2 b3 b4 b5, c5)
@@ -127,3 +122,8 @@ scanQ (c0, Quin a1 a2 a3 a4 a5) f = (Quin b1 b2 b3 b4 b5, c5)
     (b3,c3) = f (c2,a3)
     (b4,c4) = f (c3,a4)
     (b5,c5) = f (c4,a5)
+
+--[util] -------------------------------------------------------------
+
+hist :: Ord k => [(k,v)] -> [(k,[v])]
+hist kvs = Map.toList $ Map.fromListWith (++) [ (k,[v]) | (k,v) <- kvs ]
