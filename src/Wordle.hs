@@ -51,32 +51,17 @@ data Colour = Green | Yellow | Black
 newtype Letter = Letter { unLetter :: Char }
   deriving (Eq,Ord)
 
-allLetters :: [Letter]
-allLetters = map Letter ['a'..'z']
-
 data Pos = A | B | C | D | E
   deriving Show
 
 data Quin a = Quin a a a a a
   deriving (Eq,Ord,Show,Functor)
 
-thePosQuin :: Quin Pos
-thePosQuin = Quin A B C D E
-
-indexQ :: Quin a -> Pos -> a
-indexQ (Quin a b c d e) = \case A -> a; B -> b; C -> c; D -> d; E -> e
-
 listQ :: Quin a -> [a]
 listQ (Quin a b c d e) = [a,b,c,d,e]
 
 zipQ :: Quin a -> Quin b -> Quin (a,b)
 zipQ (Quin a b c d e) (Quin v w x y z) = Quin (a,v) (b,w) (c,x) (d,y) (e,z)
-
-data Con1
-  = LetInPos Letter Pos
-  | LetNotInPos Letter Pos
-  | LetCountEq Letter Int
-  | LetCountGeq Letter Int
 
 --[show] --------------------------------------------------------------------
 
@@ -92,13 +77,6 @@ instance Show Colour where
 instance Show Letter where
   show (Letter c) = show c
 
-instance Show Con1 where
-  show = \case
-    LetInPos l p -> show p ++ "=" ++ show l
-    LetNotInPos l p -> show p ++ "/=" ++ show l
-    LetCountEq l n -> "#" ++ show l ++ "=" ++ show n
-    LetCountGeq l n -> "#" ++ show l ++ ">=" ++ show n
-
 --[load] --------------------------------------------------------------------
 
 load :: FilePath -> IO Dict
@@ -107,58 +85,10 @@ load path = do
   let words = [ mkWord line | line <- lines s ]
   pure (Dict words)
 
---[marking] --------------------------------------------------------------------
-
-markOld :: Word -> Word -> Mark
-markOld guess hidden =
-  head [ mark | mark <- allMarks, isMarked guess mark hidden ]
-
-allMarks :: [Mark]
-allMarks =
-  [ Mark (Quin a b c d e) | a <- col, b <- col, c <- col, d <- col, e <- col]
-  where col = [Green,Yellow,Black]
-
-isMarked :: Word -> Mark -> Word -> Bool
-isMarked guess mark hidden = satCon (computeCon guess mark) hidden
-
-satCon :: [Con1] -> Word -> Bool
-satCon cs w = all (satCon1 w) cs
-
-satCon1 :: Word -> Con1 -> Bool
-satCon1 w@(Word wq) = \case
-  LetInPos l p -> l == getLetter p w
-  LetNotInPos l p -> l /= getLetter p w
-  LetCountEq l n -> length [ () | l' <- listQ wq, l==l' ] == n
-  LetCountGeq l n -> length [ () | l' <- listQ wq, l==l' ] >= n
-
-getLetter :: Pos -> Word -> Letter
-getLetter p (Word q) = indexQ q p
-
-computeCon :: Word -> Mark -> [Con1]
-computeCon (Word wq) (Mark mq) =
-  [ (if c == Green then LetInPos else LetNotInPos) l p
-  | (p,(l,c)) <- listQ (zipQ thePosQuin (zipQ wq mq))
-  ] ++
-  [ (if hasBlack then LetCountEq else LetCountGeq) l (g+y)
-  | l <- allLetters
-  , let cols = [ c | (c,l') <- listQ (zipQ mq wq), l==l' ]
-  , let y = length [ () | Yellow <- cols ]
-  , let hasBlack = length [ () | Black <- cols ] >= 1
-  , hasBlack || y>=1
-  , let g = length [ () | Green <- cols ]
-  ]
-
 ----------------------------------------------------------------------
 
 mark :: Word -> Word -> Mark
-mark guess hidden = do
-  let _m1 = markOld guess hidden
-  let m2 = markNew guess hidden
-  --if (m1==m2) then m2 else error (show ("mark",guess,hidden,m1,m2))
-  m2
-
-markNew :: Word -> Word -> Mark
-markNew (Word guess) (Word hidden) = do
+mark (Word guess) (Word hidden) = do
   let
     pass1 :: ([Letter],(Letter,Letter)) -> (Bool,[Letter])
     pass1 (unused,(guess,hidden)) = do
