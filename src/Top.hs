@@ -109,8 +109,8 @@ load path = do
 
 --[marking] --------------------------------------------------------------------
 
-mark :: Word -> Word -> Mark
-mark guess hidden =
+markOld :: Word -> Word -> Mark
+markOld guess hidden =
   head [ mark | mark <- allMarks, isMarked guess mark hidden ]
 
 allMarks :: [Mark]
@@ -147,3 +147,52 @@ computeCon (Word wq) (Mark mq) =
   , hasBlack || y>=1
   , let g = length [ () | Green <- cols ]
   ]
+
+----------------------------------------------------------------------
+
+mark :: Word -> Word -> Mark
+mark guess hidden = do
+  let _m1 = markOld guess hidden
+  let m2 = markNew guess hidden
+  --if (m1==m2) then m2 else error (show ("mark",guess,hidden,m1,m2))
+  m2
+
+markNew :: Word -> Word -> Mark
+markNew (Word guess) (Word hidden) = do
+  let
+    pass1 :: ([Letter],(Letter,Letter)) -> (Bool,[Letter])
+    pass1 (unused,(guess,hidden)) = do
+      let match = (guess == hidden)
+      (match,if match then unused else hidden:unused)
+
+  let
+    pass2 :: ([Letter],(Letter,Bool)) -> (Colour,[Letter])
+    pass2 (unused,(guess,isGreen)) =
+      if isGreen then (Green, unused) else
+        case lookYellow guess unused of
+          Nothing -> (Black, unused)
+          Just unused -> (Yellow, unused)
+
+  let (greenMatchQ,unused) = scanQ ([], zipQ guess hidden) pass1
+  let (colourQ,_) = scanQ (unused, zipQ guess greenMatchQ) pass2
+
+  Mark colourQ
+
+
+lookYellow :: Letter -> [Letter] -> Maybe [Letter]
+lookYellow x initial = loop [] initial
+  where
+    loop acc = \case
+      [] -> Nothing
+      y:ys -> if x==y then Just (acc++ys) else loop (y:acc) ys
+
+
+
+scanQ :: (c, Quin a) -> ((c, a) -> (b, c)) -> (Quin b, c)
+scanQ (c0, Quin a1 a2 a3 a4 a5) f = (Quin b1 b2 b3 b4 b5, c5)
+  where
+    (b1,c1) = f (c0,a1)
+    (b2,c2) = f (c1,a2)
+    (b3,c3) = f (c2,a3)
+    (b4,c4) = f (c3,a4)
+    (b5,c5) = f (c4,a5)
