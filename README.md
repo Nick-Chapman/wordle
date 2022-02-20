@@ -37,3 +37,36 @@ max=6
 distribution[(1,1),(2,46),(3,1034),(4,1137),(5,94),(6,3)]
 average=3.5555075593952483
 ```
+
+#### bot4
+
+```
+description: guess1='raise'; choose from answers, maximizing entropy over remaining; prefer possible words
+#games=2315
+total=8095
+max=6
+distribution[(1,1),(2,81),(3,1110),(4,1016),(5,104),(6,3)]
+average=3.4967602591792657
+```
+
+#### bot5
+
+```
+description: guess1='raise'; choose from legal, maximizing entropy over remaining; prefer possible words
+#games=2315
+total=8044
+max=6
+distribution[(1,1),(2,71),(3,1168),(4,981),(5,91),(6,3)]
+average=3.474730021598272
+```
+
+#### bot5 (salet)
+
+```
+description: guess1='salet'; choose from legal, maximizing entropy over remaining; prefer possible words
+#games=2315
+total=7953
+max=6
+distribution[(2,99),(3,1182),(4,963),(5,69),(6,2)]
+average=3.4354211663066954
+```
