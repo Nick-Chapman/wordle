@@ -14,27 +14,71 @@ main = getArgs >>= (run . parse)
 
 parse :: [String] -> Config
 parse = \case
-  [] -> ExploreBots
-  ["gen","entropy"] -> GenEntropy { answers = Answers, guesses = Answers }
-  ["gen","entropy","all"] -> GenEntropy { answers = Answers, guesses = Legal }
+  ["gen","entropy"] -> GenEntropy Answers
+  ["gen","entropy","all"] -> GenEntropy Legal
+
+  ["bot1"] -> TestBot Bot1
+  ["bot2"] -> TestBot Bot2
+  ["bot3"] -> TestBot Bot3
+
+  ["tab","bot1"] -> TabulateBot Bot1
+  ["tab","bot2"] -> TabulateBot Bot2
+  ["tab","bot3"] -> TabulateBot Bot3
+
+  ["view","bot1"] -> ViewBot Bot1
+  ["view","bot2"] -> ViewBot Bot2
+  ["view","bot3"] -> ViewBot Bot3
+  ["view"] -> ViewBot Bot3
+
+  [] -> TestBot Bot1
+
   args ->
     error (show ("parse",args))
-
-run :: Config -> IO ()
-run = \case
-  ExploreBots -> exploreBots
-  GenEntropy {answers,guesses} -> do
-    answers <- loadDD answers
-    guesses <- loadDD guesses
-    genEntropy answers guesses
 
 --[config]-----------------------------------------------------------
 
 data Config
-  = ExploreBots
-  | GenEntropy { answers:: DictDescriptor, guesses:: DictDescriptor }
+  = GenEntropy DictDescriptor
+  | TestBot BotDescriptor -- over all 2315 games
+  | TabulateBot BotDescriptor -- over all 2315 games
+  | ViewBot BotDescriptor -- over recent games
 
 data DictDescriptor = Answers | Legal
+
+data BotDescriptor = Bot1 | Bot2 | Bot3
+
+--[run]--------------------------------------------------------------
+
+run :: Config -> IO ()
+run config = do
+  legal <- loadDD Legal
+  answers <- loadDD Answers
+
+  case config of
+    GenEntropy dict -> do
+      dict <- loadDD dict
+      genEntropy answers dict
+
+    TabulateBot bd -> do
+      bot <- makeBotFromDescriptor bd
+      tabulateBot legal answers bot
+
+    TestBot bd -> do
+      bot <- makeBotFromDescriptor bd
+      testBot legal answers bot
+
+    ViewBot bd -> do
+      bot <- makeBotFromDescriptor bd
+      myGames <- load "my-games.list"
+      sequence_ [ runGame legal answers hidden bot | hidden <- dictWords myGames ]
+
+
+makeBotFromDescriptor :: BotDescriptor -> IO Bot
+makeBotFromDescriptor desc = do
+    answers <- loadDD Answers
+    let guess1 = makeWord "raise"
+    let mk = case desc of Bot1 -> makeBot1; Bot2 -> makeBot2; Bot3 -> makeBot3
+    pure $ mk guess1 answers
 
 --[load]--------------------------------------------------------------
 
@@ -48,30 +92,6 @@ load path = do
   s <- readFile path
   let words = [ makeWord line | line <- lines s ]
   pure (Dict (Set.fromList words))
-
---[bots]-------------------------------------------------------------
-
-exploreBots :: IO ()
-exploreBots = do
-    legal <- loadDD Legal
-    answers <- loadDD Answers
-    let _bot1 = makeBot1 (makeWord "raise") answers
-    tryBot legal answers _bot1
-    let _bot2 = makeBot2 (makeWord "raise") answers
-    --tryBot legal answers _bot2
-    let _bot3 = makeBot3 (makeWord "raise") answers
-    --tryBot legal answers _bot3
-    pure ()
-
-tryBot :: Dict -> Dict -> Bot -> IO ()
-tryBot legal answers bot = do
-  -- show details of 24 specific games
-  --myGames <- load "my-games.list"
-  --sequence_ [ runGame legal answers hidden bot | hidden <- dictWords myGames ]
-  -- then test/tabulate over the full answer list
-  let _ = testBot legal answers bot
-  tabulateBot legal answers bot
-  pure ()
 
 --[entropy]-----------------------------------------------------------
 
@@ -215,8 +235,8 @@ data Act -- Bot actions
   = Log String Act
   | Guess Word (Mark -> Act)
 
-_runGame :: Dict -> Dict -> Word -> Bot -> IO ()
-_runGame legal answers hidden Bot{act} = do
+runGame :: Dict -> Dict -> Word -> Bot -> IO ()
+runGame legal answers hidden Bot{act} = do
   putStrLn "------------------------------"
   putStrLn ("GameRunner: hidden = " ++ show hidden)
   run answers 1 act
