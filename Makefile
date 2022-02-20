@@ -21,3 +21,6 @@ bot3.trace: src/*.hs
 
 bot4.trace: src/*.hs
 	stack run -- tab bot4 > bot4.trace # 5m 57s
+
+bot5.trace: src/*.hs
+	stack run -- tab bot5 > bot5.trace

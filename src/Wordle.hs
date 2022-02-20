@@ -23,25 +23,29 @@ parse = \case
   ["bot2"] -> TestBot Bot2
   ["bot3"] -> TestBot Bot3
   ["bot4"] -> TestBot Bot4
+  ["bot5"] -> TestBot Bot5
 
   ["tab","bot1"] -> TabulateBot Bot1
   ["tab","bot2"] -> TabulateBot Bot2
   ["tab","bot3"] -> TabulateBot Bot3
   ["tab","bot4"] -> TabulateBot Bot4
+  ["tab","bot5"] -> TabulateBot Bot5
 
   ["view","bot1"] -> ViewBot Bot1
   ["view","bot2"] -> ViewBot Bot2
   ["view","bot3"] -> ViewBot Bot3
   ["view","bot4"] -> ViewBot Bot4
-  ["view"] -> ViewBot Bot4
+  ["view","bot5"] -> ViewBot Bot5
+  ["view"] -> ViewBot Bot5
 
   ["assist","bot1",s] -> Assist Bot1 (SelectedHidden s)
   ["assist","bot2",s] -> Assist Bot2 (SelectedHidden s)
   ["assist","bot3",s] -> Assist Bot3 (SelectedHidden s)
   ["assist","bot4",s] -> Assist Bot4 (SelectedHidden s)
+  ["assist","bot5",s] -> Assist Bot5 (SelectedHidden s)
 
-  ["assist",s] -> Assist Bot4 (SelectedHidden s)
-  ["assist"] -> Assist Bot4 RandomHidden
+  ["assist",s] -> Assist Bot5 (SelectedHidden s)
+  ["assist"] -> Assist Bot5 RandomHidden
 
   ["play",s] -> PlayGame (SelectedHidden s)
   ["play"] -> PlayGame RandomHidden
@@ -64,7 +68,7 @@ data Puzzle = SelectedHidden String | RandomHidden
 
 data DictDescriptor = Answers | Legal
 
-data BotDescriptor = Bot1 | Bot2 | Bot3 | Bot4
+data BotDescriptor = Bot1 | Bot2 | Bot3 | Bot4 | Bot5
 
 --[run]--------------------------------------------------------------
 
@@ -113,6 +117,7 @@ getPuzzleWord answers = \case
 makeBotFromDescriptor :: BotDescriptor -> IO Bot
 makeBotFromDescriptor desc = do
     answers <- loadDD Answers
+    legal <- loadDD Legal
     let guess1 = makeWord "raise"
     let
       mk = case desc of
@@ -120,6 +125,7 @@ makeBotFromDescriptor desc = do
         Bot2 -> makeBot2
         Bot3 -> makeBot3
         Bot4 -> makeBot4
+        Bot5 -> makeBot5 legal -- like Bot4 but will consider any legal answer
     pure $ mk guess1 answers
 
 --[load]--------------------------------------------------------------
@@ -615,6 +621,36 @@ makeBot4 guess1 answers = do
       "choose from answers, maximizing entropy over remaining; " ++
       "prefer possible words"
   let act = Guess guess1 (loop answers)
+  Bot { name, description, act }
+  where
+    loop :: Dict -> Word -> Mark -> Act
+    loop lastRemaining lastGuess mark = do
+      let remaining = filterDict lastRemaining lastGuess mark
+
+      let
+        rankedChoices = reverse $
+          sortBy (comparing snd)
+          [ (guess, score4 remaining guess) | guess <- dictWords answers ]
+
+      Log (showRankedChoices remaining (take 5 rankedChoices)) $ do
+      let
+        guess = do
+          let n = length (dictWords remaining)
+          if n == 1 || n==2 then head (dictWords remaining) else
+            fst (head rankedChoices)
+
+      Guess guess (loop remaining)
+
+
+makeBot5 :: Dict -> Word -> Dict -> Bot
+makeBot5 legal guess1 answers = do
+  let
+    name = "bot5"
+    description =
+      "guess1='" ++ show guess1 ++ "'; " ++
+      "choose from legal, maximizing entropy over remaining; " ++
+      "prefer possible words"
+  let act = Guess guess1 (loop legal)
   Bot { name, description, act }
   where
     loop :: Dict -> Word -> Mark -> Act
