@@ -350,7 +350,6 @@ makeBot3 guess1 answers = do
 
 ----------------------------------------------------------------------
 
--- TODO: check my word lists match online
 -- TODO: GameMaster: ensures guess are withing the legal set
 -- TODO: represent Dict as Word Set
 -- TODO: tabulate a bot over all 2315 games
