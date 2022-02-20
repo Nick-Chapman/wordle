@@ -53,27 +53,28 @@ load path = do
 
 exploreBots :: IO ()
 exploreBots = do
+    legal <- loadDD Legal
     answers <- loadDD Answers
     let _bot1 = makeBot1 (makeWord "raise") answers
-    tryBot _bot1 answers
+    tryBot legal answers _bot1
 
     let _bot2 = makeBot2 (makeWord "raise") answers
-    --tryBot _bot2 answers
+    --tryBot legal answers _bot2
 
     let _bot3 = makeBot3 (makeWord "raise") answers
-    --tryBot _bot3 answers
+    --tryBot legal answers _bot3
 
     pure ()
 
-tryBot :: Bot -> Dict -> IO ()
-tryBot bot answers = do
+tryBot :: Dict -> Dict -> Bot -> IO ()
+tryBot legal answers bot = do
   -- show details of 24 specific games
-  --myGames <- load "my-games.list"
-  --sequence_ [ runGame answers hidden bot | hidden <- dictWords myGames ]
+  myGames <- load "my-games.list"
+  let _ = sequence_ [ runGame legal answers hidden bot | hidden <- dictWords myGames ]
   -- then compute the stats or the full answer list
   --putStrLn "------------------------------"
   --let _ = testBotDisplay myGames bot -- minitest
-  testBotDisplay answers bot
+  testBotDisplay legal answers bot
   pure ()
 
 --[entropy]-----------------------------------------------------------
@@ -106,6 +107,12 @@ filterDict dict guess mark =
            , computeMark guess word == mark
            ]
 
+-- ensure guesses are within a set of legal words
+computeMarkChecked :: Dict -> Word -> Word -> Maybe Mark
+computeMarkChecked legal guess hidden =
+  if guess `Set.notMember` (dictSet legal) then Nothing else
+    Just $ computeMark guess hidden
+
 computeMark :: Word -> Word -> Mark
 computeMark (Word guess) (Word hidden) = do
   let
@@ -137,7 +144,7 @@ lookYellow x initial = loop [] initial
 
 --[types] ------------------------------------------------------------
 
-data Dict = Dict (Set Word)
+data Dict = Dict { dictSet :: Set Word }
 
 makeDict :: [Word] -> Dict
 makeDict = Dict . Set.fromList
@@ -212,8 +219,8 @@ data Act -- Bot actions
   = Log String Act
   | Guess Word (Mark -> Act)
 
-_runGame :: Dict -> Word -> Bot -> IO ()
-_runGame answers hidden Bot{act} = do
+runGame :: Dict -> Dict -> Word -> Bot -> IO ()
+runGame legal answers hidden Bot{act} = do
   putStrLn "------------------------------"
   putStrLn ("GameRunner: hidden = " ++ show hidden)
   run answers 1 act
@@ -224,23 +231,25 @@ _runGame answers hidden Bot{act} = do
         putStrLn ("bot: " ++ message)
         run possible i act
       Guess guess f -> do
-        let mark = computeMark guess hidden
-
-        let n = length (dictWords possible)
-        let possible' = filterDict possible guess mark
-        let n' = length (dictWords possible')
-
-        putStrLn $
-          "guess #" ++ show i ++ " : " ++
-          show guess ++ " --> " ++ show mark ++
-          " " ++ show n ++ "/" ++ show n'
-
-        if guess == hidden || i==25 then pure () else
-          run possible' (i+1) (f mark)
+        case computeMarkChecked legal guess hidden of
+          Nothing -> do
+            putStrLn $
+              "illegal word: '" ++ show guess ++ "'"
+            run possible i act
+          Just mark -> do
+            let n = length (dictWords possible)
+            let possible' = filterDict possible guess mark
+            let n' = length (dictWords possible')
+            putStrLn $
+              "guess #" ++ show i ++ " : " ++
+              show guess ++ " --> " ++ show mark ++
+              " " ++ show n ++ "/" ++ show n'
+            if guess == hidden || i==25 then pure () else
+              run possible' (i+1) (f mark)
 
 -- | test bot over a set of words, returning the number of guess for each word
-testBotDisplay :: Dict -> Bot -> IO ()
-testBotDisplay dict Bot{description,act} = do
+testBotDisplay :: Dict -> Dict -> Bot -> IO ()
+testBotDisplay legal answers Bot{description,act} = do
   let
     loop :: [Int] -> Int -> [Word] -> IO [Int]
     loop acc i = \case
@@ -251,12 +260,12 @@ testBotDisplay dict Bot{description,act} = do
         let! n = howManyGuess hidden act
         loop (n:acc) (i+1) more
 
-  ns <- loop [] 1 (dictWords dict)
+  ns <- loop [] 1 (dictWords answers)
   putStrLn ""
 
   let dist = [ (n,length xs) | (n,xs) <- hist [ (n,()) | n <- ns ] ]
   let tot = sum ns
-  let av :: Double = fromIntegral tot / fromIntegral (length (dictWords dict))
+  let av :: Double = fromIntegral tot / fromIntegral (length (dictWords answers))
   putStrLn (
     "test-bot...\n" ++
     "description: " ++ description ++ "\n" ++
@@ -266,17 +275,20 @@ testBotDisplay dict Bot{description,act} = do
     "distribution" ++ show dist ++ "\n" ++
     "average=" ++ show av)
 
-howManyGuess :: Word -> Act -> Int
-howManyGuess hidden = run 1
   where
-    run :: Int -> Act -> Int
-    run n = \case
-      Log _ bot -> run n bot
-      Guess guess f -> do
-        let mark = computeMark guess hidden
-        if guess == hidden || n == 100 then n else
-          run (n+1) (f mark)
-
+    howManyGuess :: Word -> Act -> Int
+    howManyGuess hidden = run 1
+      where
+        run :: Int -> Act -> Int
+        run n = \case
+          Log _ bot -> run n bot
+          Guess guess f -> do
+            case computeMarkChecked legal guess hidden of
+              Nothing ->
+                error (show ("testBotDisplay, illegal word:",guess))
+              Just mark ->
+                if guess == hidden || n == 100 then n else
+                  run (n+1) (f mark)
 
 --[bot1]--------------------------------------------------------------
 
@@ -358,10 +370,7 @@ makeBot3 guess1 answers = do
 
 ----------------------------------------------------------------------
 
--- TODO: GameMaster: ensures guess are withing the legal set
--- TODO: represent Dict as Word Set
 -- TODO: tabulate a bot over all 2315 games
-
 -- TODO: interactive bot -- i.e. let a human play, with assistance
 -- TODO: GameMaster variants: fixed word, random word, absurdle, interactive
 -- TODO: bot4: rank works by expected entropy remaining (prefer possible!)
