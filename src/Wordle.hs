@@ -2,10 +2,12 @@ module Wordle (main) where
 
 import Data.List (maximumBy)
 import Data.Ord (comparing)
+import Data.Set (Set)
 import Prelude hiding (Word)
 import System.Environment (getArgs)
 import System.IO (hFlush,stdout)
 import qualified Data.Map.Strict as Map
+import qualified Data.Set as Set
 
 main :: IO ()
 main = getArgs >>= (run . parse)
@@ -45,7 +47,7 @@ load :: FilePath -> IO Dict
 load path = do
   s <- readFile path
   let words = [ makeWord line | line <- lines s ]
-  pure (Dict words)
+  pure (Dict (Set.fromList words))
 
 --[bots]-------------------------------------------------------------
 
@@ -99,10 +101,10 @@ calcEntropy dict guess = do
 
 filterDict :: Dict -> Word -> Mark -> Dict
 filterDict dict guess mark =
-  Dict [ word
-       | word <- dictWords dict
-       , computeMark guess word == mark
-       ]
+  makeDict [ word
+           | word <- dictWords dict
+           , computeMark guess word == mark
+           ]
 
 computeMark :: Word -> Word -> Mark
 computeMark (Word guess) (Word hidden) = do
@@ -135,7 +137,13 @@ lookYellow x initial = loop [] initial
 
 --[types] ------------------------------------------------------------
 
-data Dict = Dict { dictWords :: [Word] }
+data Dict = Dict (Set Word)
+
+makeDict :: [Word] -> Dict
+makeDict = Dict . Set.fromList
+
+dictWords :: Dict -> [Word]
+dictWords (Dict set) = Set.toList set
 
 newtype Word = Word (Quin Letter)
   deriving (Eq,Ord)
