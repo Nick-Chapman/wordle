@@ -347,3 +347,16 @@ makeBot3 guess1 answers = do
       if n == 1 || n==2 then head (dictWords remaining) else
         fst $ maximumBy (comparing snd)
         [ (guess, calcEntropy remaining guess) | guess <- dictWords answers ]
+
+----------------------------------------------------------------------
+
+-- TODO: check my word lists match online
+-- TODO: GameMaster: ensures guess are withing the legal set
+-- TODO: represent Dict as Word Set
+-- TODO: tabulate a bot over all 2315 games
+
+-- TODO: interactive bot -- i.e. let a human play, with assistance
+-- TODO: GameMaster variants: fixed word, random word, absurdle, interactive
+-- TODO: bot4: rank works by expected entropy remaining (prefer possible!)
+-- TODO: precompute/memoize marking function
+-- TODO: allow bots to choose from all legal words
