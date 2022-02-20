@@ -30,7 +30,8 @@ parse = \case
   ["view","bot3"] -> ViewBot Bot3
   ["view"] -> ViewBot Bot3
 
-  [] -> TestBot Bot1
+  [s] -> PlayGame (makeWord s)
+  [] -> PlayGame (makeWord "tacit")
 
   args ->
     error (show ("parse",args))
@@ -42,6 +43,7 @@ data Config
   | TestBot BotDescriptor -- over all 2315 games
   | TabulateBot BotDescriptor -- over all 2315 games
   | ViewBot BotDescriptor -- over recent games
+  | PlayGame Word -- play game, with no assistance
 
 data DictDescriptor = Answers | Legal
 
@@ -70,8 +72,11 @@ run config = do
     ViewBot bd -> do
       bot <- makeBotFromDescriptor bd
       myGames <- load "my-games.list"
-      sequence_ [ runGame legal answers hidden bot | hidden <- dictWords myGames ]
+      sequence_ [ viewGame legal answers hidden bot | hidden <- dictWords myGames ]
 
+    PlayGame hidden -> do
+      let bot = human
+      playGame legal answers hidden bot
 
 makeBotFromDescriptor :: BotDescriptor -> IO Bot
 makeBotFromDescriptor desc = do
@@ -172,9 +177,12 @@ newtype Word = Word (Quin Letter)
   deriving (Eq,Ord)
 
 makeWord :: String -> Word
-makeWord = \case
-  a:b:c:d:e:_ -> Word (fmap Letter (Quin a b c d e))
-  s -> error (show ("makeWord",s))
+makeWord s = maybe (error (show ("makeWord",s))) id (tryMakeWord s)
+
+tryMakeWord :: String -> Maybe Word
+tryMakeWord = \case
+  a:b:c:d:e:_ -> Just $ Word (fmap Letter (Quin a b c d e))
+  _ -> Nothing
 
 newtype Mark = Mark (Quin Colour)
   deriving (Eq,Ord)
@@ -234,15 +242,75 @@ data Bot = Bot { description :: String, act :: Act }
 data Act -- Bot actions
   = Log String Act
   | Guess Word (Mark -> Act)
+  | Interactive (IO Act)
 
-runGame :: Dict -> Dict -> Word -> Bot -> IO ()
-runGame legal answers hidden Bot{act} = do
-  putStrLn "------------------------------"
-  putStrLn ("GameRunner: hidden = " ++ show hidden)
+--[human]-------------------------------------------------------------
+
+human :: Bot
+human = do
+  let description = "human"
+  Bot { description, act }
+  where
+    act = Interactive $ do
+      guess <- readGuess
+      pure $ Guess guess (\_mark -> act)
+
+readGuess :: IO Word
+readGuess = do
+  putStr "Enter guess> "
+  hFlush stdout
+  s <- getLine
+  case tryMakeWord s of
+    Just w -> pure w
+    Nothing -> do
+      putStrLn "bad word; a word must have 5 letters"
+      readGuess
+
+----------------------------------------------------------------------
+
+playGame :: Dict -> Dict -> Word -> Bot -> IO ()
+playGame legal answers hidden Bot{description,act} = do
+  --putStrLn ("[hidden = " ++ show hidden ++ "]")
+  putStrLn ("Player: " ++ description)
   run answers 1 act
   where
     run :: Dict -> Int -> Act -> IO ()
     run possible i = \case
+      Interactive io -> do
+        act <- io
+        run possible i act
+      Log message act -> do
+        putStrLn ("bot: " ++ message)
+        run possible i act
+      Guess guess f -> do
+        case computeMarkChecked legal guess hidden of
+          Nothing -> do
+            putStrLn $
+              "illegal word: '" ++ show guess ++ "'"
+            run possible i act
+          Just mark -> do
+            let n = length (dictWords possible)
+            let possible' = filterDict possible guess mark
+            let n' = length (dictWords possible')
+            putStrLn $
+              "guess #" ++ show i ++ " : " ++
+              show guess ++ " --> " ++ show mark ++
+              " " ++ show n ++ "/" ++ show n'
+            if guess == hidden || i==25 then pure () else
+              run possible' (i+1) (f mark)
+
+--[view]--------------------------------------------------------------
+
+viewGame :: Dict -> Dict -> Word -> Bot -> IO ()
+viewGame legal answers hidden Bot{act} = do
+  putStrLn "------------------------------"
+  putStrLn ("ViewGame: hidden = " ++ show hidden)
+  run answers 1 act
+  where
+    run :: Dict -> Int -> Act -> IO ()
+    run possible i = \case
+      Interactive{} ->
+        undefined
       Log message act -> do
         putStrLn ("bot: " ++ message)
         run possible i act
@@ -286,6 +354,7 @@ testBot legal answers Bot{description,act} = do
       where
         run :: Int -> Act -> Int
         run n = \case
+          Interactive{} -> error "cant test interactive bot"
           Log _ bot -> run n bot
           Guess guess f -> do
             case computeMarkChecked legal guess hidden of
@@ -317,6 +386,7 @@ tabulateBot legal answers Bot{description,act} = do
       where
         run :: [Word] -> Int -> Act -> [Word]
         run acc n = \case
+          Interactive{} -> error "cant tabulate interactive bot"
           Log _ bot -> run acc n bot
           Guess guess f -> do
             case computeMarkChecked legal guess hidden of
@@ -420,7 +490,7 @@ makeBot3 guess1 answers = do
 
 ----------------------------------------------------------------------
 
--- TODO: interactive bot -- i.e. let a human play, with assistance
+-- TODO: interactive game, with bot assistance
 -- TODO: GameMaster variants: fixed word, random word, absurdle, interactive
 -- TODO: bot4: rank works by expected entropy remaining (prefer possible!)
 -- TODO: precompute/memoize marking function
