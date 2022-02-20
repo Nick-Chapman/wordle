@@ -601,7 +601,7 @@ showRankedChoices remaining wes = do
       if w `Set.member` dictSet remaining then "*" else ""
 
 showE :: Double -> String
-showE = printf "%0.2g"
+showE = printf "%0.2f"
 
 
 --[bot4]--------------------------------------------------------------
@@ -644,7 +644,17 @@ score4 remaining guess = do
     x = if guess `Set.notMember` dictSet remaining then 0.0 else do
       let p = 1.0 / fromIntegral n
       p * logBase 2.0 (fromIntegral n)
-  (e+x)
+  e+x
+
+{-showRankedChoicesEEE :: Dict -> [(Word,EEE)] -> String
+showRankedChoicesEEE remaining xs = do
+  intercalate ", " $
+    [ maybeStar w ++ show w ++
+      "(" ++ showE e1 ++ "+" ++ showE e2 ++ "=" ++ showE e3 ++ ")"
+    | (w,(e1,e2,e3)) <- xs ]
+  where
+    maybeStar w =
+      if w `Set.member` dictSet remaining then "*" else ""-}
 
 
 ----------------------------------------------------------------------
