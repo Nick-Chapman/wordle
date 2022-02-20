@@ -30,8 +30,15 @@ parse = \case
   ["view","bot3"] -> ViewBot Bot3
   ["view"] -> ViewBot Bot3
 
-  [s] -> PlayGame (makeWord s)
-  [] -> PlayGame (makeWord "tacit")
+  ["assist","bot1",s] -> Assist Bot1 s
+  ["assist","bot2",s] -> Assist Bot2 s
+  ["assist","bot3",s] -> Assist Bot3 s
+
+  ["assist",s] -> Assist Bot3 s
+  -- ["assist"] -> Assist Bot3 (makeWord "RANDOM") -- TODO
+
+  [s] -> PlayGame s
+  -- [] -> PlayGame (makeWord "RANDOM") -- TODO
 
   args ->
     error (show ("parse",args))
@@ -43,7 +50,8 @@ data Config
   | TestBot BotDescriptor -- over all 2315 games
   | TabulateBot BotDescriptor -- over all 2315 games
   | ViewBot BotDescriptor -- over recent games
-  | PlayGame Word -- play game, with no assistance
+  | PlayGame String -- play game, with no assistance
+  | Assist BotDescriptor String -- play game, *with* assistance
 
 data DictDescriptor = Answers | Legal
 
@@ -74,9 +82,16 @@ run config = do
       myGames <- load "my-games.list"
       sequence_ [ viewGame legal answers hidden bot | hidden <- dictWords myGames ]
 
-    PlayGame hidden -> do
-      let bot = human
-      playGame legal answers hidden bot
+    PlayGame s -> do
+      let hidden = makeLegalWord legal s
+      let player = human
+      playGame legal answers hidden player
+
+    Assist bd s -> do
+      let! hidden = makeLegalWord legal s
+      bot <- makeBotFromDescriptor bd
+      let player = assistedHuman bot
+      playGame legal answers hidden player
 
 makeBotFromDescriptor :: BotDescriptor -> IO Bot
 makeBotFromDescriptor desc = do
@@ -176,12 +191,17 @@ dictWords (Dict set) = Set.toList set
 newtype Word = Word (Quin Letter)
   deriving (Eq,Ord)
 
+makeLegalWord :: Dict -> String -> Word
+makeLegalWord legal s = do
+  if s `Set.member` (Set.map show (dictSet legal)) then makeWord s else
+    error ("illegal word: " ++ s)
+
 makeWord :: String -> Word
 makeWord s = maybe (error (show ("makeWord",s))) id (tryMakeWord s)
 
 tryMakeWord :: String -> Maybe Word
 tryMakeWord = \case
-  a:b:c:d:e:_ -> Just $ Word (fmap Letter (Quin a b c d e))
+  a:b:c:d:e:[] -> Just $ Word (fmap Letter (Quin a b c d e))
   _ -> Nothing
 
 newtype Mark = Mark (Quin Colour)
@@ -241,7 +261,7 @@ data Bot = Bot { description :: String, act :: Act }
 
 data Act -- Bot actions
   = Log String Act
-  | Guess Word (Mark -> Act)
+  | Guess Word (Word -> Mark -> Act)
   | Interactive (IO Act)
 
 --[human]-------------------------------------------------------------
@@ -253,7 +273,7 @@ human = do
   where
     act = Interactive $ do
       guess <- readGuess
-      pure $ Guess guess (\_mark -> act)
+      pure $ Guess guess (\_guess _mark -> act)
 
 readGuess :: IO Word
 readGuess = do
@@ -265,6 +285,42 @@ readGuess = do
     Nothing -> do
       putStrLn "bad word; a word must have 5 letters"
       readGuess
+
+--[human assist]------------------------------------------------------
+
+assistedHuman :: Bot -> Bot
+assistedHuman Bot{description=assistDesc, act=assist0} = do
+  Bot { description = "human assisted by: " ++ assistDesc, act }
+  where
+    act :: Act
+    act = loop assist0
+
+    loop :: Act -> Act
+    loop assist =
+      case assist of
+        Interactive{} -> undefined
+        Log mes assist -> do
+          Log ("assist: " ++ mes) $
+            loop assist
+        Guess g f -> do
+          Log ("assist-would-guess: " ++ show g) $ do
+            Interactive $ do
+              guess <- readGuessDefault g
+              pure $ Guess guess $ \guess mark -> do
+                let assist = f guess mark
+                loop assist
+
+readGuessDefault :: Word -> IO Word
+readGuessDefault def = do
+  putStr "Enter guess> "
+  hFlush stdout
+  s <- getLine
+  if s == "" then pure def else
+    case tryMakeWord s of
+      Just w -> pure w
+      Nothing -> do
+        putStrLn "bad word; a word must have 5 letters"
+        readGuess
 
 ----------------------------------------------------------------------
 
@@ -280,7 +336,7 @@ playGame legal answers hidden Bot{description,act} = do
         act <- io
         run possible i act
       Log message act -> do
-        putStrLn ("bot: " ++ message)
+        putStrLn message
         run possible i act
       Guess guess f -> do
         case computeMarkChecked legal guess hidden of
@@ -297,7 +353,7 @@ playGame legal answers hidden Bot{description,act} = do
               show guess ++ " --> " ++ show mark ++
               " " ++ show n ++ "/" ++ show n'
             if guess == hidden || i==25 then pure () else
-              run possible' (i+1) (f mark)
+              run possible' (i+1) (f guess mark)
 
 --[view]--------------------------------------------------------------
 
@@ -312,7 +368,7 @@ viewGame legal answers hidden Bot{act} = do
       Interactive{} ->
         undefined
       Log message act -> do
-        putStrLn ("bot: " ++ message)
+        putStrLn message
         run possible i act
       Guess guess f -> do
         case computeMarkChecked legal guess hidden of
@@ -329,7 +385,7 @@ viewGame legal answers hidden Bot{act} = do
               show guess ++ " --> " ++ show mark ++
               " " ++ show n ++ "/" ++ show n'
             if guess == hidden || i==25 then pure () else
-              run possible' (i+1) (f mark)
+              run possible' (i+1) (f guess mark)
 
 --[testBot]-----------------------------------------------------------
 
@@ -362,7 +418,7 @@ testBot legal answers Bot{description,act} = do
                 error ("testBot, illegal word: " ++ show guess)
               Just mark ->
                 if guess == hidden || n == 100 then n else
-                  run (n+1) (f mark)
+                  run (n+1) (f guess mark)
 
 --[tabulate]----------------------------------------------------------
 
@@ -394,7 +450,7 @@ tabulateBot legal answers Bot{description,act} = do
                 error ("tabulateBot, illegal word: " ++ show guess)
               Just mark ->
                 if guess == hidden || n == 100 then reverse (guess:acc) else
-                  run (guess:acc) (n+1) (f mark)
+                  run (guess:acc) (n+1) (f guess mark)
 
 printStats :: String -> [Int] -> IO ()
 printStats description ns = do
@@ -418,14 +474,14 @@ makeBot1 guess1 answers = do
     description =
       "guess1='" ++ show guess1 ++ "'; " ++
       "choose first word from remaining"
-  let act = Guess guess1 (loop answers guess1)
+  let act = Guess guess1 (loop answers)
   Bot { description, act }
   where
     loop :: Dict -> Word -> Mark -> Act
     loop remaining lastGuess mark = do
       let remaining' = filterDict remaining lastGuess mark
       let nextGuess = choose remaining'
-      Guess nextGuess (loop remaining' nextGuess)
+      Guess nextGuess (loop remaining')
 
     choose :: Dict -> Word
     choose dict =
@@ -440,7 +496,7 @@ makeBot2 guess1 answers = do
     description =
       "guess1='" ++ show guess1 ++ "'; " ++
       "choose from remaining, maximizing entropy over remaining"
-  let act = Guess guess1 (loop answers guess1)
+  let act = Guess guess1 (loop answers)
   Bot { description, act }
   where
     loop :: Dict -> Word -> Mark -> Act
@@ -457,7 +513,7 @@ makeBot2 guess1 answers = do
       let (nextGuess,ee) = choose remaining'
       let _mes2 = "calc-entropy(" ++ show nextGuess ++ ") = " ++ show ee
       --Log _mes1 $ Log _mes2 $ Guess nextGuess (loop remaining' nextGuess)
-      Guess nextGuess (loop remaining' nextGuess)
+      Guess nextGuess (loop remaining')
 
     choose :: Dict -> (Word,Double)
     choose remaining =
@@ -472,14 +528,14 @@ makeBot3 guess1 answers = do
     description =
       "guess1='" ++ show guess1 ++ "'; " ++
       "choose from answers, maximizing entropy over remaining"
-  let act = Guess guess1 (loop answers guess1)
+  let act = Guess guess1 (loop answers)
   Bot { description, act }
   where
     loop :: Dict -> Word -> Mark -> Act
     loop remaining lastGuess mark = do
       let remaining' = filterDict remaining lastGuess mark
       let nextGuess = choose remaining'
-      Guess nextGuess (loop remaining' nextGuess)
+      Guess nextGuess (loop remaining')
 
     choose :: Dict -> Word
     choose remaining = do
@@ -490,7 +546,7 @@ makeBot3 guess1 answers = do
 
 ----------------------------------------------------------------------
 
--- TODO: interactive game, with bot assistance
+-- TODO: interactive game, with bot assistance (show choices)
 -- TODO: GameMaster variants: fixed word, random word, absurdle, interactive
 -- TODO: bot4: rank works by expected entropy remaining (prefer possible!)
 -- TODO: precompute/memoize marking function
