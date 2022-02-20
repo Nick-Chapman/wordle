@@ -66,11 +66,11 @@ exploreBots = do
 tryBot :: Bot -> Dict -> IO ()
 tryBot bot answers = do
   -- show details of 24 specific games
-  myGames <- load "my-games.list"
-  sequence_ [ runGame answers hidden bot | hidden <- dictWords myGames ]
+  --myGames <- load "my-games.list"
+  --sequence_ [ runGame answers hidden bot | hidden <- dictWords myGames ]
   -- then compute the stats or the full answer list
-  putStrLn "------------------------------"
-  let _ = testBotDisplay myGames bot -- minitest
+  --putStrLn "------------------------------"
+  --let _ = testBotDisplay myGames bot -- minitest
   testBotDisplay answers bot
   pure ()
 
@@ -204,8 +204,8 @@ data Act -- Bot actions
   = Log String Act
   | Guess Word (Mark -> Act)
 
-runGame :: Dict -> Word -> Bot -> IO ()
-runGame answers hidden Bot{act} = do
+_runGame :: Dict -> Word -> Bot -> IO ()
+_runGame answers hidden Bot{act} = do
   putStrLn "------------------------------"
   putStrLn ("GameRunner: hidden = " ++ show hidden)
   run answers 1 act
@@ -238,7 +238,7 @@ testBotDisplay dict Bot{description,act} = do
     loop acc i = \case
       [] -> pure acc
       hidden:more -> do
-        putStr (if i `mod` 100 == 0 then [['c'..'z'] !! (i `div` 100)] else ".")
+        putStr (if i `mod` 100 == 15 then [['c'..'z'] !! (i `div` 100)] else ".")
         hFlush stdout
         let! n = howManyGuess hidden act
         loop (n:acc) (i+1) more
