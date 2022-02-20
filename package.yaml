@@ -21,6 +21,7 @@ dependencies:
 - extra
 - haskeline
 - mtl
+- random
 - split
 - text
 - time

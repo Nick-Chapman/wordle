@@ -1,11 +1,13 @@
 module Wordle (main) where
 
-import Data.List (intercalate,maximumBy)
+import Data.List (intercalate,maximumBy,sort,sortBy)
 import Data.Ord (comparing)
 import Data.Set (Set)
 import Prelude hiding (Word)
 import System.Environment (getArgs)
 import System.IO (hFlush,stdout)
+import System.Random (getStdRandom,randomR)
+import Text.Printf (printf)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 
@@ -30,15 +32,16 @@ parse = \case
   ["view","bot3"] -> ViewBot Bot3
   ["view"] -> ViewBot Bot3
 
-  ["assist","bot1",s] -> Assist Bot1 s
-  ["assist","bot2",s] -> Assist Bot2 s
-  ["assist","bot3",s] -> Assist Bot3 s
+  ["assist","bot1",s] -> Assist Bot1 (SelectedHidden s)
+  ["assist","bot2",s] -> Assist Bot2 (SelectedHidden s)
+  ["assist","bot3",s] -> Assist Bot3 (SelectedHidden s)
 
-  ["assist",s] -> Assist Bot3 s
-  -- ["assist"] -> Assist Bot3 (makeWord "RANDOM") -- TODO
+  ["assist",s] -> Assist Bot3 (SelectedHidden s)
+  ["assist"] -> Assist Bot3 RandomHidden
 
-  [s] -> PlayGame s
-  -- [] -> PlayGame (makeWord "RANDOM") -- TODO
+  ["play",s] -> PlayGame (SelectedHidden s)
+  ["play"] -> PlayGame RandomHidden
+  [] -> PlayGame RandomHidden
 
   args ->
     error (show ("parse",args))
@@ -50,8 +53,10 @@ data Config
   | TestBot BotDescriptor -- over all 2315 games
   | TabulateBot BotDescriptor -- over all 2315 games
   | ViewBot BotDescriptor -- over recent games
-  | PlayGame String -- play game, with no assistance
-  | Assist BotDescriptor String -- play game, *with* assistance
+  | PlayGame Puzzle -- play game, with no assistance
+  | Assist BotDescriptor Puzzle -- play game, *with* assistance
+
+data Puzzle = SelectedHidden String | RandomHidden
 
 data DictDescriptor = Answers | Legal
 
@@ -82,16 +87,24 @@ run config = do
       myGames <- load "my-games.list"
       sequence_ [ viewGame legal answers hidden bot | hidden <- dictWords myGames ]
 
-    PlayGame s -> do
-      let hidden = makeLegalWord legal s
+    PlayGame puzzle -> do
+      hidden <- getPuzzleWord answers puzzle
       let player = human
       playGame legal answers hidden player
 
-    Assist bd s -> do
-      let! hidden = makeLegalWord legal s
+    Assist bd puzzle -> do
+      hidden <- getPuzzleWord answers puzzle
       bot <- makeBotFromDescriptor bd
       let player = assistedHuman bot
       playGame legal answers hidden player
+
+
+getPuzzleWord :: Dict -> Puzzle -> IO Word
+getPuzzleWord answers = \case
+  SelectedHidden s -> pure $ makeAnswerWord answers s
+  RandomHidden -> do
+    putStrLn "Selecting random word..."
+    randomListPick (dictWords answers)
 
 makeBotFromDescriptor :: BotDescriptor -> IO Bot
 makeBotFromDescriptor desc = do
@@ -188,13 +201,20 @@ makeDict = Dict . Set.fromList
 dictWords :: Dict -> [Word]
 dictWords (Dict set) = Set.toList set
 
+seeDictSummary :: Dict -> String
+seeDictSummary dict = do
+  let ws = sort (map show (dictWords dict)) -- sort not necessary
+  intercalate "," $ do
+    if length ws <= 5 then ws else do
+      take 3 ws ++ ["..."] ++ take 2 (reverse ws)
+
 newtype Word = Word (Quin Letter)
   deriving (Eq,Ord)
 
-makeLegalWord :: Dict -> String -> Word
-makeLegalWord legal s = do
+makeAnswerWord :: Dict -> String -> Word
+makeAnswerWord legal s = do
   if s `Set.member` (Set.map show (dictSet legal)) then makeWord s else
-    error ("illegal word: " ++ s)
+    error ("not a valid answer word: " ++ s)
 
 makeWord :: String -> Word
 makeWord s = maybe (error (show ("makeWord",s))) id (tryMakeWord s)
@@ -255,9 +275,14 @@ scanQ (c0, Quin a1 a2 a3 a4 a5) f = (Quin b1 b2 b3 b4 b5, c5)
 hist :: Ord k => [(k,v)] -> [(k,[v])]
 hist kvs = Map.toList $ Map.fromListWith (++) [ (k,[v]) | (k,v) <- kvs ]
 
+randomListPick :: [a] -> IO a
+randomListPick xs = do
+  n <- getStdRandom (randomR (0,length xs - 1))
+  return (xs !! n)
+
 --[Bot]---------------------------------------------------------------
 
-data Bot = Bot { description :: String, act :: Act }
+data Bot = Bot { name :: String, description :: String, act :: Act }
 
 data Act -- Bot actions
   = Log String Act
@@ -268,8 +293,9 @@ data Act -- Bot actions
 
 human :: Bot
 human = do
-  let description = "human"
-  Bot { description, act }
+  let name = "human"
+  let description = "real human player"
+  Bot { name, description, act }
   where
     act = Interactive $ do
       guess <- readGuess
@@ -289,8 +315,10 @@ readGuess = do
 --[human assist]------------------------------------------------------
 
 assistedHuman :: Bot -> Bot
-assistedHuman Bot{description=assistDesc, act=assist0} = do
-  Bot { description = "human assisted by: " ++ assistDesc, act }
+assistedHuman Bot{name=assistName, act=assist0} = do
+  let name = "assisted human"
+  let description = "human assisted by: " ++ assistName
+  Bot { name, description, act }
   where
     act :: Act
     act = loop assist0
@@ -352,6 +380,7 @@ playGame legal answers hidden Bot{description,act} = do
               "guess #" ++ show i ++ " : " ++
               show guess ++ " --> " ++ show mark ++
               " " ++ show n ++ "/" ++ show n'
+            putStrLn ("possible: " ++ seeDictSummary possible')
             if guess == hidden || i==25 then pure () else
               run possible' (i+1) (f guess mark)
 
@@ -471,11 +500,12 @@ printStats description ns = do
 makeBot1 :: Word -> Dict -> Bot
 makeBot1 guess1 answers = do
   let
+    name = "bot1"
     description =
       "guess1='" ++ show guess1 ++ "'; " ++
       "choose first word from remaining"
   let act = Guess guess1 (loop answers)
-  Bot { description, act }
+  Bot { name, description, act }
   where
     loop :: Dict -> Word -> Mark -> Act
     loop remaining lastGuess mark = do
@@ -493,11 +523,12 @@ makeBot1 guess1 answers = do
 makeBot2 :: Word -> Dict -> Bot
 makeBot2 guess1 answers = do
   let
+    name = "bot2"
     description =
       "guess1='" ++ show guess1 ++ "'; " ++
       "choose from remaining, maximizing entropy over remaining"
   let act = Guess guess1 (loop answers)
-  Bot { description, act }
+  Bot { name, description, act }
   where
     loop :: Dict -> Word -> Mark -> Act
     loop remaining lastGuess mark = do
@@ -525,29 +556,43 @@ makeBot2 guess1 answers = do
 makeBot3 :: Word -> Dict -> Bot
 makeBot3 guess1 answers = do
   let
+    name = "bot3"
     description =
       "guess1='" ++ show guess1 ++ "'; " ++
       "choose from answers, maximizing entropy over remaining"
   let act = Guess guess1 (loop answers)
-  Bot { description, act }
+  Bot { name, description, act }
   where
     loop :: Dict -> Word -> Mark -> Act
-    loop remaining lastGuess mark = do
-      let remaining' = filterDict remaining lastGuess mark
-      let nextGuess = choose remaining'
-      Guess nextGuess (loop remaining')
+    loop lastRemaining lastGuess mark = do
+      let remaining = filterDict lastRemaining lastGuess mark
 
-    choose :: Dict -> Word
-    choose remaining = do
-      let n = length (dictWords remaining)
-      if n == 1 || n==2 then head (dictWords remaining) else
-        fst $ maximumBy (comparing snd)
-        [ (guess, calcEntropy remaining guess) | guess <- dictWords answers ]
+      let
+        rankedChoices = reverse $
+          sortBy (comparing snd)
+          [ (guess, calcEntropy remaining guess) | guess <- dictWords answers ]
+
+      Log (showRankedChoices (take 5 rankedChoices)) $ do
+      let
+        guess = do
+          let n = length (dictWords remaining)
+          if n == 1 || n==2 then head (dictWords remaining) else
+            fst (head rankedChoices)
+
+      Guess guess (loop remaining)
+
+
+showRankedChoices :: [(Word,Double)] -> String
+showRankedChoices wes = do
+  intercalate ", " $
+    [ show w ++ "(" ++ showE e ++ ")" | (w,e) <- wes ]
+
+showE :: Double -> String
+showE = printf "%0.2g"
 
 ----------------------------------------------------------------------
 
--- TODO: interactive game, with bot assistance (show choices)
--- TODO: GameMaster variants: fixed word, random word, absurdle, interactive
+-- TODO: GameMaster variants: absurdle, interactive
 -- TODO: bot4: rank works by expected entropy remaining (prefer possible!)
 -- TODO: precompute/memoize marking function
 -- TODO: allow bots to choose from all legal words
