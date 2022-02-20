@@ -118,7 +118,7 @@ makeBotFromDescriptor :: BotDescriptor -> IO Bot
 makeBotFromDescriptor desc = do
     answers <- loadDD Answers
     legal <- loadDD Legal
-    let guess1 = makeWord "raise"
+    let guess1 = makeWord "salet"
     let
       mk = case desc of
         Bot1 -> makeBot1
