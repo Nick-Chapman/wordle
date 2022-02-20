@@ -22,22 +22,26 @@ parse = \case
   ["bot1"] -> TestBot Bot1
   ["bot2"] -> TestBot Bot2
   ["bot3"] -> TestBot Bot3
+  ["bot4"] -> TestBot Bot4
 
   ["tab","bot1"] -> TabulateBot Bot1
   ["tab","bot2"] -> TabulateBot Bot2
   ["tab","bot3"] -> TabulateBot Bot3
+  ["tab","bot4"] -> TabulateBot Bot4
 
   ["view","bot1"] -> ViewBot Bot1
   ["view","bot2"] -> ViewBot Bot2
   ["view","bot3"] -> ViewBot Bot3
-  ["view"] -> ViewBot Bot3
+  ["view","bot4"] -> ViewBot Bot4
+  ["view"] -> ViewBot Bot4
 
   ["assist","bot1",s] -> Assist Bot1 (SelectedHidden s)
   ["assist","bot2",s] -> Assist Bot2 (SelectedHidden s)
   ["assist","bot3",s] -> Assist Bot3 (SelectedHidden s)
+  ["assist","bot4",s] -> Assist Bot4 (SelectedHidden s)
 
-  ["assist",s] -> Assist Bot3 (SelectedHidden s)
-  ["assist"] -> Assist Bot3 RandomHidden
+  ["assist",s] -> Assist Bot4 (SelectedHidden s)
+  ["assist"] -> Assist Bot4 RandomHidden
 
   ["play",s] -> PlayGame (SelectedHidden s)
   ["play"] -> PlayGame RandomHidden
@@ -60,7 +64,7 @@ data Puzzle = SelectedHidden String | RandomHidden
 
 data DictDescriptor = Answers | Legal
 
-data BotDescriptor = Bot1 | Bot2 | Bot3
+data BotDescriptor = Bot1 | Bot2 | Bot3 | Bot4
 
 --[run]--------------------------------------------------------------
 
@@ -110,7 +114,12 @@ makeBotFromDescriptor :: BotDescriptor -> IO Bot
 makeBotFromDescriptor desc = do
     answers <- loadDD Answers
     let guess1 = makeWord "raise"
-    let mk = case desc of Bot1 -> makeBot1; Bot2 -> makeBot2; Bot3 -> makeBot3
+    let
+      mk = case desc of
+        Bot1 -> makeBot1
+        Bot2 -> makeBot2
+        Bot3 -> makeBot3
+        Bot4 -> makeBot4
     pure $ mk guess1 answers
 
 --[load]--------------------------------------------------------------
@@ -460,6 +469,7 @@ tabulateBot legal answers Bot{description,act} = do
       hidden:more -> do
         let guesses = whatGuesses hidden act
         putStrLn (intercalate "," (map show guesses))
+        hFlush stdout
         let! n = length guesses
         loop (n:acc) (i+1) more
 
@@ -572,7 +582,7 @@ makeBot3 guess1 answers = do
           sortBy (comparing snd)
           [ (guess, calcEntropy remaining guess) | guess <- dictWords answers ]
 
-      Log (showRankedChoices (take 5 rankedChoices)) $ do
+      Log (showRankedChoices remaining (take 5 rankedChoices)) $ do
       let
         guess = do
           let n = length (dictWords remaining)
@@ -582,13 +592,60 @@ makeBot3 guess1 answers = do
       Guess guess (loop remaining)
 
 
-showRankedChoices :: [(Word,Double)] -> String
-showRankedChoices wes = do
+showRankedChoices :: Dict -> [(Word,Double)] -> String
+showRankedChoices remaining wes = do
   intercalate ", " $
-    [ show w ++ "(" ++ showE e ++ ")" | (w,e) <- wes ]
+    [ maybeStar w ++ show w ++ "(" ++ showE e ++ ")" | (w,e) <- wes ]
+  where
+    maybeStar w =
+      if w `Set.member` dictSet remaining then "*" else ""
 
 showE :: Double -> String
 showE = printf "%0.2g"
+
+
+--[bot4]--------------------------------------------------------------
+
+makeBot4 :: Word -> Dict -> Bot
+makeBot4 guess1 answers = do
+  let
+    name = "bot4"
+    description =
+      "guess1='" ++ show guess1 ++ "'; " ++
+      "choose from answers, maximizing entropy over remaining; " ++
+      "prefer possible words"
+  let act = Guess guess1 (loop answers)
+  Bot { name, description, act }
+  where
+    loop :: Dict -> Word -> Mark -> Act
+    loop lastRemaining lastGuess mark = do
+      let remaining = filterDict lastRemaining lastGuess mark
+
+      let
+        rankedChoices = reverse $
+          sortBy (comparing snd)
+          [ (guess, score4 remaining guess) | guess <- dictWords answers ]
+
+      Log (showRankedChoices remaining (take 5 rankedChoices)) $ do
+      let
+        guess = do
+          let n = length (dictWords remaining)
+          if n == 1 || n==2 then head (dictWords remaining) else
+            fst (head rankedChoices)
+
+      Guess guess (loop remaining)
+
+
+score4 :: Dict -> Word -> Double
+score4 remaining guess = do
+  let n = length (dictWords remaining)
+  let e = calcEntropy remaining guess
+  let
+    x = if guess `Set.notMember` dictSet remaining then 0.0 else do
+      let p = 1.0 / fromIntegral n
+      p * logBase 2.0 (fromIntegral n)
+  (e+x)
+
 
 ----------------------------------------------------------------------
 
