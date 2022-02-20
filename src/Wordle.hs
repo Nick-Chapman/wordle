@@ -650,7 +650,7 @@ makeBot5 legal guess1 answers = do
       "guess1='" ++ show guess1 ++ "'; " ++
       "choose from legal, maximizing entropy over remaining; " ++
       "prefer possible words"
-  let act = Guess guess1 (loop legal)
+  let act = Guess guess1 (loop answers)
   Bot { name, description, act }
   where
     loop :: Dict -> Word -> Mark -> Act
@@ -660,16 +660,17 @@ makeBot5 legal guess1 answers = do
       let
         rankedChoices = reverse $
           sortBy (comparing snd)
-          [ (guess, score4 remaining guess) | guess <- dictWords answers ]
+          [ (guess, score4 remaining guess) | guess <- dictWords legal ]
 
       Log (showRankedChoices remaining (take 5 rankedChoices)) $ do
-      let
-        guess = do
-          let n = length (dictWords remaining)
-          if n == 1 || n==2 then head (dictWords remaining) else
-            fst (head rankedChoices)
+        let n = length (dictWords remaining)
+        --Log ("n="++show n) $ do
+        let
+          guess = do
+            if n == 1 || n==2 then head (dictWords remaining) else
+              fst (head rankedChoices)
 
-      Guess guess (loop remaining)
+        Guess guess (loop remaining)
 
 
 score4 :: Dict -> Word -> Double
