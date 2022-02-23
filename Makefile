@@ -14,7 +14,7 @@ bot1.trace: src/*.hs
 	stack run -- tab bot1 > bot1.trace # 3s
 
 bot2.trace: src/*.hs
-	stack run -- tab bot2 > bot2.trace # 18s
+	stack run -- tab bot2 > bot2.trace # 18s... #26s (when got slower?)
 
 bot3.trace: src/*.hs
 	stack run -- tab bot3 > bot3.trace # 5m 44s

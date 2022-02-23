@@ -3,6 +3,8 @@ module Wordle (main) where
 import Data.List (intercalate,maximumBy,sort,sortBy)
 import Data.Ord (comparing)
 import Data.Set (Set)
+import Letter (Letter,mkLetter,unLetter)
+import Memo (Memo,Trie,trie,untrie)
 import Prelude hiding (Word)
 import System.Environment (getArgs)
 import System.IO (hFlush,stdout)
@@ -10,6 +12,10 @@ import System.Random (getStdRandom,randomR)
 import Text.Printf (printf)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
+import qualified Memo
+
+useMemo :: Bool
+useMemo = True -- SWITCH HERE
 
 main :: IO ()
 main = getArgs >>= (run . parse)
@@ -49,7 +55,8 @@ parse = \case
 
   ["play",s] -> PlayGame (SelectedHidden s)
   ["play"] -> PlayGame RandomHidden
-  [] -> PlayGame RandomHidden
+
+  [] -> MemoTest
 
   args ->
     error (show ("parse",args))
@@ -63,6 +70,7 @@ data Config
   | ViewBot BotDescriptor -- over recent games
   | PlayGame Puzzle -- play game, with no assistance
   | Assist BotDescriptor Puzzle -- play game, *with* assistance
+  | MemoTest
 
 data Puzzle = SelectedHidden String | RandomHidden
 
@@ -105,6 +113,17 @@ run config = do
       bot <- makeBotFromDescriptor bd
       let player = assistedHuman bot
       playGame legal answers hidden player
+
+    MemoTest -> memoTest
+
+
+memoTest :: IO ()
+memoTest = do
+  print (fib 10000)
+    where
+      fib :: Integer -> Integer
+      fib = Memo.memo fib'
+        where fib' n = if n<=1 then n else fib (n-1) + fib (n-2)
 
 
 getPuzzleWord :: Dict -> Puzzle -> IO Word
@@ -177,8 +196,8 @@ computeMarkChecked legal guess hidden =
   if guess `Set.notMember` (dictSet legal) then Nothing else
     Just $ computeMark guess hidden
 
-computeMark :: Word -> Word -> Mark
-computeMark (Word guess) (Word hidden) = do
+computeMark0 :: Word -> Word -> Mark
+computeMark0 (Word guess) (Word hidden) = do
   let
     pass1 :: ([Letter],(Letter,Letter)) -> (Bool,[Letter])
     pass1 (unused,(guess,hidden)) = do
@@ -223,7 +242,7 @@ seeDictSummary dict = do
     if length ws <= 5 then ws else do
       take 3 ws ++ ["..."] ++ take 2 (reverse ws)
 
-newtype Word = Word (Quin Letter)
+newtype Word = Word { unWord :: Quin Letter }
   deriving (Eq,Ord)
 
 makeAnswerWord :: Dict -> String -> Word
@@ -236,16 +255,13 @@ makeWord s = maybe (error (show ("makeWord",s))) id (tryMakeWord s)
 
 tryMakeWord :: String -> Maybe Word
 tryMakeWord = \case
-  a:b:c:d:e:[] -> Just $ Word (fmap Letter (Quin a b c d e))
+  a:b:c:d:e:[] -> Just $ Word (fmap mkLetter (Quin a b c d e))
   _ -> Nothing
 
 newtype Mark = Mark (Quin Colour)
   deriving (Eq,Ord)
 
 data Colour = Green | Yellow | Black
-  deriving (Eq,Ord)
-
-newtype Letter = Letter { unLetter :: Char }
   deriving (Eq,Ord)
 
 data Pos = A | B | C | D | E
@@ -261,9 +277,6 @@ instance Show Mark where
 
 instance Show Colour where
   show = \case Green -> "G"; Yellow -> "y"; Black -> "-"
-
-instance Show Letter where
-  show (Letter c) = show c
 
 --[Quin]--------------------------------------------------------------
 
@@ -700,3 +713,21 @@ showRankedChoicesEEE remaining xs = do
 -- TODO: bot4: rank works by expected entropy remaining (prefer possible!)
 -- TODO: precompute/memoize marking function
 -- TODO: allow bots to choose from all legal words
+
+--[memoization]-----------------------------------------------------------
+
+computeMark :: Word -> Word -> Mark
+computeMark = if useMemo then computeMarkM else computeMark0
+
+computeMarkM :: Word -> Word -> Mark
+computeMarkM = Memo.memo computeMark0
+
+instance Memo Word where
+  data Trie Word o = Wrap { unwrap :: Trie (Quin Letter) o }
+  trie f = Wrap (trie (f . Word))
+  untrie f = untrie (unwrap f) . unWord
+
+instance Memo a => Memo (Quin a) where
+  data Trie (Quin a) o = P5 (Trie a (Trie a (Trie a (Trie a (Trie a o)))))
+  trie f = P5 (trie (\a -> trie (\b -> trie (\c -> trie (\d -> trie (\e -> f (Quin a b c d e)))))))
+  untrie (P5 tab) (Quin a b c d e) = untrie (untrie (untrie (untrie (untrie tab a) b) c) d) e
