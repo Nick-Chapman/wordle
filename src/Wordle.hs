@@ -5,6 +5,7 @@ import Data.Ord (comparing)
 import Data.Set (Set)
 import Letter (Letter,mkLetter,unLetter)
 import Memo (Memo,Trie,trie,untrie)
+import Par4 (Par,parse,terminated,char,nl,alts,lit,key)
 import Prelude hiding (Word)
 import System.Environment (getArgs)
 import System.IO (hFlush,stdout)
@@ -18,10 +19,10 @@ useMemo :: Bool
 useMemo = False -- SWITCH HERE
 
 main :: IO ()
-main = getArgs >>= (run . parse)
+main = getArgs >>= (run . parseCommandLine)
 
-parse :: [String] -> Config
-parse = \case
+parseCommandLine :: [String] -> Config
+parseCommandLine = \case
   ["gen","entropy"] -> GenEntropy Answers
   ["gen","entropy","all"] -> GenEntropy Legal
 
@@ -56,9 +57,12 @@ parse = \case
   ["play",s] -> PlayGame (SelectedHidden s)
   ["play"] -> PlayGame RandomHidden
 
-  ["leak",s] -> ExploreInfoLeak s
+  ["memo-test"] -> MemoTest
 
-  [] -> MemoTest
+  ["leak",s] -> ExploreInfoLeak s
+  ["gen-fingerprint"] -> GenFingerprint
+  [s] -> HoleInOne (SelectedHidden s)
+  [] -> HoleInOne RandomHidden
 
   args ->
     error (show ("parse",args))
@@ -74,6 +78,8 @@ data Config
   | Assist BotDescriptor Puzzle -- play game, *with* assistance
   | MemoTest
   | ExploreInfoLeak String
+  | GenFingerprint
+  | HoleInOne Puzzle
 
 data Puzzle = SelectedHidden String | RandomHidden
 
@@ -118,8 +124,16 @@ run config = do
       playGame legal answers hidden player
 
     MemoTest -> memoTest
+
     ExploreInfoLeak s ->
       exploreInfoLeak legal answers (makeAnswerWord answers s)
+
+    GenFingerprint ->
+      genFingerprint legal answers
+
+    HoleInOne puzzle -> do
+      hidden <- getPuzzleWord answers puzzle
+      simultateHoleInOneBot legal hidden
 
 
 exploreInfoLeak :: Dict -> Dict -> Word -> IO ()
@@ -755,3 +769,84 @@ instance Memo a => Memo (Quin a) where
   data Trie (Quin a) o = P5 (Trie a (Trie a (Trie a (Trie a (Trie a o)))))
   trie f = P5 (trie (\a -> trie (\b -> trie (\c -> trie (\d -> trie (\e -> f (Quin a b c d e)))))))
   untrie (P5 tab) (Quin a b c d e) = untrie (untrie (untrie (untrie (untrie tab a) b) c) d) e
+
+--[fingerprint]-------------------------------------------------------
+
+genFingerprint :: Dict -> Dict -> IO ()
+genFingerprint legal answers = do
+  let fp = computeFingerprint legal answers
+  printFingerprint fp
+
+data Fingerprint = Fingerprint [(Word,Set Mark)]
+
+loadFingerprint :: FilePath -> IO Fingerprint
+loadFingerprint path = parse fingerprintGram <$> readFile path
+
+fingerprintGram :: Par Fingerprint
+fingerprintGram = Fingerprint <$> terminated nl line
+  where
+    line :: Par (Word,Set Mark)
+    line = do
+      (s,bs) <- rawLine
+      pure $ (makeWord s, Set.fromList [ m | (m,b) <- zip allMarks bs, b ])
+
+    rawLine :: Par (String,[Bool])
+    rawLine = do
+      s <- sequence (take 5 $ repeat char)
+      key " : "
+      bs <- sequence (take 243 (repeat xOrSpace))
+      pure (s, bs)
+
+    xOrSpace :: Par Bool
+    xOrSpace = alts [ do lit 'x'; pure True , do lit ' '; pure False ]
+
+computeFingerprint :: Dict -> Dict -> Fingerprint
+computeFingerprint legal answers = do
+  Fingerprint
+    [ (hidden, posMarks)
+    | hidden <- dictWords answers
+    , let posMarks = Set.fromList [ computeMark g hidden | g <- dictWords legal ]
+    ]
+
+printFingerprint :: Fingerprint -> IO ()
+printFingerprint (Fingerprint xs) = do
+  sequence_
+    [ putStrLn (show w ++ " : " ++ line)
+    | (w,posMarksSet) <- xs
+    , let line = [ if b then 'x' else ' '
+                 | m <- allMarks
+                 , let b = m `Set.member` posMarksSet
+                 ]
+    ]
+
+allMarks :: [Mark]
+allMarks =
+  [ Mark (Quin a b c d e) | a <- x, b <- x, c <- x, d <- x, e <- x ]
+  where x = [Green,Yellow,Black]
+
+--[hole-in-one-bot]---------------------------------------------------
+
+simultateHoleInOneBot :: Dict -> Word -> IO ()
+simultateHoleInOneBot legal hidden = do
+  putStrLn ("simultateHoleInOneBot: hidden = " ++ show hidden)
+  fp0 <- loadFingerprint "fingerprint.out"
+  loop 1 fp0
+  where
+    loop :: Int -> Fingerprint -> IO ()
+    loop i fp = do
+      g <- randomListPick (dictWords legal)
+      let m = computeMark g hidden
+      let fp' = restrictFP m fp
+      let n = statFP fp
+      let n' = statFP fp'
+      if n' < n then printf "%5d : %s -- %i\n" i (show m)  n' else pure ()
+      if n' > 1 then loop (i+1) fp' else do
+        let Fingerprint [(theAnswer,_)] = fp'
+        putStrLn ("simultateHoleInOneBot: theAnswer = " ++ show theAnswer)
+
+statFP :: Fingerprint -> Int
+statFP (Fingerprint lines) = length lines
+
+restrictFP :: Mark -> Fingerprint -> Fingerprint
+restrictFP mark (Fingerprint lines) = Fingerprint lines'
+  where lines' = [ (w,ms) | (w,ms) <- lines, mark `Set.member` ms ]

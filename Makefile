@@ -24,3 +24,6 @@ bot4.trace: src/*.hs
 
 bot5.trace: src/*.hs
 	stack run -- tab bot5 > bot5.trace
+
+fingerprint.out:
+	stack run gen-fingerprint > $@
