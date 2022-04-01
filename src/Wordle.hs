@@ -60,7 +60,9 @@ parseCommandLine = \case
   ["memo-test"] -> MemoTest
 
   ["leak",s] -> ExploreInfoLeak s
+
   ["gen-fingerprint"] -> GenFingerprint
+  ["hole-count"] -> ComputeHoleCount
   [s] -> HoleInOne (SelectedHidden s)
   [] -> HoleInOne RandomHidden
 
@@ -80,6 +82,7 @@ data Config
   | ExploreInfoLeak String
   | GenFingerprint
   | HoleInOne Puzzle
+  | ComputeHoleCount
 
 data Puzzle = SelectedHidden String | RandomHidden
 
@@ -134,6 +137,9 @@ run config = do
     HoleInOne puzzle -> do
       hidden <- getPuzzleWord answers puzzle
       simultateHoleInOneBot legal hidden
+
+    ComputeHoleCount -> do
+      computeHoleCount legal answers
 
 
 exploreInfoLeak :: Dict -> Dict -> Word -> IO ()
@@ -850,3 +856,24 @@ statFP (Fingerprint lines) = length lines
 restrictFP :: Mark -> Fingerprint -> Fingerprint
 restrictFP mark (Fingerprint lines) = Fingerprint lines'
   where lines' = [ (w,ms) | (w,ms) <- lines, mark `Set.member` ms ]
+
+
+computeHoleCount :: Dict -> Dict -> IO ()
+computeHoleCount legal answers = do
+  fp0 <- loadFingerprint "fingerprint.out"
+  sequence_ [ pr hidden (holes fp0 legal hidden) | hidden <- dictWords answers ]
+    where pr w n = putStrLn (show w ++ " : " ++ show n)
+
+holes :: Fingerprint -> Dict -> Word -> Int
+holes fp0 legal hidden = do
+  let
+    loop :: Fingerprint -> [Mark] -> Int
+    loop fp = \case
+      [] -> statFP fp
+      m:ms -> loop (restrictFP m fp) ms
+
+  let marks = nub [ computeMark g hidden | g <- dictWords legal ]
+        where nub = Set.toList . Set.fromList
+
+  loop fp0 marks
+

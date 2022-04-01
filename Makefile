@@ -27,3 +27,6 @@ bot5.trace: src/*.hs
 
 fingerprint.out:
 	stack run gen-fingerprint > $@
+
+hole.count:
+	stack run hole-count > $@
