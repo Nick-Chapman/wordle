@@ -15,7 +15,7 @@ import qualified Data.Set as Set
 import qualified Memo
 
 useMemo :: Bool
-useMemo = True -- SWITCH HERE
+useMemo = False -- SWITCH HERE
 
 main :: IO ()
 main = getArgs >>= (run . parse)
@@ -56,6 +56,8 @@ parse = \case
   ["play",s] -> PlayGame (SelectedHidden s)
   ["play"] -> PlayGame RandomHidden
 
+  ["leak",s] -> ExploreInfoLeak s
+
   [] -> MemoTest
 
   args ->
@@ -71,6 +73,7 @@ data Config
   | PlayGame Puzzle -- play game, with no assistance
   | Assist BotDescriptor Puzzle -- play game, *with* assistance
   | MemoTest
+  | ExploreInfoLeak String
 
 data Puzzle = SelectedHidden String | RandomHidden
 
@@ -115,6 +118,27 @@ run config = do
       playGame legal answers hidden player
 
     MemoTest -> memoTest
+    ExploreInfoLeak s ->
+      exploreInfoLeak legal answers (makeAnswerWord answers s)
+
+
+exploreInfoLeak :: Dict -> Dict -> Word -> IO ()
+exploreInfoLeak legal answers hidden = do
+  let
+    posMarksForToday = nub [ computeMark g hidden | g <- dictWords legal ]
+      where nub = Set.toList . Set.fromList
+  print (length posMarksForToday)
+  let
+    xs =
+      [ (i,w,b)
+      | (i,w) <- zip [1::Int ..] (dictWords answers)
+      , let posMarks = [ computeMark g w | g <- dictWords legal ]
+      , let b = all (\seen -> any (\m -> m == seen) posMarks) posMarksForToday
+      ]
+  mapM_ print xs
+  let ys = [ y | (_,y,b) <- xs, b ]
+  print ys
+  print (length ys)
 
 
 memoTest :: IO ()
